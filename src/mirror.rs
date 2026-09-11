@@ -42,6 +42,11 @@ const DEFAULT_PER_RUN: usize = 40;
 /// a poller, and a typo in a variable should not turn one into a nuisance.
 const FLOOR_MINS: u64 = 15;
 
+/// How many child sitemaps of an index one pass will read. A gallery big
+/// enough to need more than this many 50,000-URL files is not one this
+/// mirror is for.
+const MAX_INDEX_CHILDREN: usize = 20;
+
 struct Config {
     sitemap: String,
     /// Only links containing this are considered. A gallery that publishes
@@ -127,7 +132,23 @@ async fn pass(cfg: &Config, attempted: &mut HashSet<String>) -> anyhow::Result<(
         .await
         .map_err(|e| anyhow::anyhow!("could not read the sitemap: {e}"))?;
 
-    let mut links = locs(&xml);
+    // A sitemap index lists other sitemaps rather than pages. A site that
+    // splits its gallery into `sitemap-gallery-1.xml`, `-2.xml`... once it
+    // outgrows one file publishes exactly that, and pointing the mirror at
+    // the index is what keeps it following the whole gallery rather than the
+    // first 50,000 pages of it. Each child is fetched through the same guard.
+    let mut links = if is_index(&xml) {
+        let mut all = Vec::new();
+        for child in locs(&xml).into_iter().take(MAX_INDEX_CHILDREN) {
+            match crate::fetch::guarded_text(&child, SITEMAP_CAP).await {
+                Ok(x) => all.extend(locs(&x)),
+                Err(e) => tracing::warn!("mirror: could not read {child}: {e}"),
+            }
+        }
+        all
+    } else {
+        locs(&xml)
+    };
     if let Some(m) = &cfg.matching {
         links.retain(|l| l.contains(m.as_str()));
     }
@@ -149,13 +170,18 @@ async fn pass(cfg: &Config, attempted: &mut HashSet<String>) -> anyhow::Result<(
     Ok((queued, seen))
 }
 
+/// Whether this is a sitemap index (a list of sitemaps) rather than a list of
+/// pages. The root element says which; nothing else in the file does.
+fn is_index(xml: &str) -> bool {
+    xml.contains("<sitemapindex")
+}
+
 /// The `<loc>` values in a sitemap.
 ///
 /// Read with a string scan rather than an XML parser: the shape is two fixed
 /// tags and this app has no XML dependency to spend on one file. A sitemap
-/// index (a list of other sitemaps) has the same `<loc>` shape, so pointing
-/// the mirror at one yields sitemap URLs rather than pages -- which import as
-/// nothing and log as refusals. Point it at the leaf.
+/// index has the same `<loc>` shape, which is why `pass` checks `is_index`
+/// before deciding whether these are pages or more sitemaps.
 fn locs(xml: &str) -> Vec<String> {
     const OPEN: &str = "<loc>";
     const CLOSE: &str = "</loc>";
@@ -177,7 +203,24 @@ fn locs(xml: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::locs;
+    use super::{is_index, locs};
+
+    /// An index and a leaf carry the same `<loc>` tags; only the root tells
+    /// them apart, and getting it wrong means importing sitemap URLs as
+    /// pictures.
+    #[test]
+    fn an_index_is_told_apart_from_a_leaf() {
+        let index = "<?xml version=\"1.0\"?>\n<sitemapindex xmlns=\"x\">\
+             <sitemap><loc>https://example.com/sitemaps/sitemap-gallery-1.xml</loc></sitemap>\
+             </sitemapindex>";
+        let leaf = "<urlset><url><loc>https://example.com/a</loc></url></urlset>";
+        assert!(is_index(index));
+        assert!(!is_index(leaf));
+        assert_eq!(
+            locs(index),
+            vec!["https://example.com/sitemaps/sitemap-gallery-1.xml".to_string()]
+        );
+    }
 
     #[test]
     fn reads_the_locs_out_of_a_sitemap() {

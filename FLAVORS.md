@@ -148,7 +148,7 @@ have no mirror at all.
 
 | key | default | what it is |
 |---|---|---|
-| `MIRROR_SITEMAP` | *(off)* | The other site's leaf sitemap (the one listing pages, not an index of sitemaps). Set, the mirror is on. |
+| `MIRROR_SITEMAP` | *(off)* | The other site's sitemap. A leaf (listing pages) or an index (listing sitemaps; up to 20 children are followed). Set, the mirror is on. |
 | `MIRROR_MATCH` | *(any)* | A substring a link must contain to count, e.g. `/en/gallery/`. |
 | `MIRROR_EVERY_MINS` | `60` | Floor 15. |
 | `MIRROR_PER_RUN` | `40` | How many new links one pass takes on. |
