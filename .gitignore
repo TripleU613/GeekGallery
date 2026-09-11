@@ -1,0 +1,22 @@
+/target
+/uploads/orig/*
+/uploads/thumb/*
+/uploads/poster/*
+!/uploads/orig/.gitkeep
+!/uploads/thumb/.gitkeep
+!/uploads/poster/.gitkeep
+.env
+# Local agent/editor tooling state, not project config.
+/.claude
+
+# Tailwind toolchain: the CSS is generated at build time from style/tailwind.css
+# and tailwind.config.js, both of which ARE tracked. The installed compiler is not.
+/node_modules
+
+# Browser-automation scratch output from local verification runs.
+/.playwright-mcp
+
+
+# Anything the provisioning script printed. Never tracked.
+secrets.env
+*.secrets.env

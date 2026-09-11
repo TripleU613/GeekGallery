@@ -1,0 +1,23 @@
+# The deploy-env broker (see worker.js). One per operator, on a zone you own:
+#
+#   cd deploy/env-broker
+#   # edit the route below to a hostname on your zone, then
+#   CLOUDFLARE_ACCOUNT_ID=... npx wrangler deploy
+#   npx wrangler secret put FLAVOR_ENV_EXAMPLE < example.env
+#   ...one secret per flavor; the next push to main deploys every one of them.
+#
+# Then set the repository variable BROKER_URL to https://<that hostname>.
+# The custom domain is on a zone this account owns, so wrangler creates the
+# DNS record and certificate itself.
+name = "geekgallery-deploy-env"
+main = "worker.js"
+compatibility_date = "2026-01-01"
+workers_dev = false
+
+routes = [
+  { pattern = "deploy-env.example.com", custom_domain = true },
+]
+
+[vars]
+# The one repository whose pushes to main may read the flavors. Forks: yours.
+REPOSITORY = "TripleU613/GeekGallery"

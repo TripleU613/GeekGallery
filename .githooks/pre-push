@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# The local gate, run automatically before a push.
+#
+# This exists because I twice pushed something CI caught in seconds that a local
+# command would have caught faster: once a rustfmt reflow left by a clippy fix
+# (I ran clippy and the tests afterwards, but not fmt), and once a Docker base
+# image pinned to a digest that did not resolve. CI is ~12 minutes; this is ~30
+# seconds. Discipline that depends on remembering is not discipline.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+# Skip deliberately:      SKIP_GATE=1 git push
+set -euo pipefail
+
+if [ "${SKIP_GATE:-}" = "1" ]; then
+  echo "pre-push: gate skipped (SKIP_GATE=1)"
+  exit 0
+fi
+
+fail() { echo "pre-push: $1" >&2; echo "pre-push: fix it, or SKIP_GATE=1 git push to override." >&2; exit 1; }
+
+echo "pre-push: fmt"
+cargo fmt --all -- --check >/dev/null 2>&1 || fail "cargo fmt --all -- --check failed"
+
+# Both feature sets: ssr and hydrate compile different code from the same files,
+# so one passing says nothing about the other.
+echo "pre-push: clippy (ssr)"
+cargo clippy --quiet --no-default-features --features ssr --all-targets -- -D warnings \
+  >/dev/null 2>&1 || fail "clippy failed for --features ssr"
+
+echo "pre-push: clippy (hydrate/wasm)"
+cargo clippy --quiet --no-default-features --features hydrate \
+  --target wasm32-unknown-unknown -- -D warnings >/dev/null 2>&1 \
+  || fail "clippy failed for --features hydrate"
+
+echo "pre-push: tests"
+cargo test --quiet --no-default-features --features ssr >/dev/null 2>&1 \
+  || fail "cargo test failed"
+
+# The repo is public, so a credential reaching a tracked file or a commit is not
+# a mistake that can be taken back -- it is published the moment this push lands.
+# Checked here rather than only in CI for exactly that reason: CI finds it after
+# it is already on GitHub.
+echo "pre-push: no secret in history, files or artifacts"
+scripts/audit-secrets.sh >/tmp/geekgallery-audit.$$ 2>&1 \
+  || { cat /tmp/geekgallery-audit.$$; rm -f /tmp/geekgallery-audit.$$; \
+       fail "audit-secrets found a credential (see above)"; }
+rm -f /tmp/geekgallery-audit.$$
+
+# Every pinned image digest must actually resolve. A digest fetched with the
+# wrong Accept headers is real but wrong, and fails the build with a bare
+# "not found" -- which is exactly how one CI run was wasted.
+echo "pre-push: image digests resolve"
+python3 - <<'PY' || fail "a pinned image digest does not resolve"
+import re, sys, urllib.request, json
+
+ACCEPT = ", ".join([
+    "application/vnd.oci.image.index.v1+json",
+    "application/vnd.docker.distribution.manifest.list.v2+json",
+    "application/vnd.oci.image.manifest.v1+json",
+    "application/vnd.docker.distribution.manifest.v2+json",
+])
+
+def get(url, headers):
+    return urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=20)
+
+def resolves(repo, digest):
+    if repo.startswith("mcr.microsoft.com/"):
+        path = repo.split("/", 1)[1]
+        url = f"https://mcr.microsoft.com/v2/{path}/manifests/{digest}"
+        try:
+            return get(url, {"Accept": ACCEPT}).status == 200
+        except Exception:
+            return False
+    # Docker Hub needs a pull token, and bare names live under library/.
+    name = repo if "/" in repo else f"library/{repo}"
+    try:
+        tok = json.load(get(
+            f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{name}:pull", {}
+        ))["token"]
+        url = f"https://registry-1.docker.io/v2/{name}/manifests/{digest}"
+        return get(url, {"Accept": ACCEPT, "Authorization": f"Bearer {tok}"}).status == 200
+    except Exception:
+        return False
+
+ok = True
+seen = set()
+# compose is read as well as the Dockerfile because it can pin an image too.
+for path in ("Dockerfile", "docker-compose.yml"):
+    try:
+        text = open(path).read()
+    except OSError:
+        continue
+    for m in re.finditer(r'([A-Za-z0-9][A-Za-z0-9./_\-]*?)(?::[\w.\-]+)?@(sha256:[0-9a-f]{64})', text):
+        repo, digest = m.group(1).lstrip("-"), m.group(2)
+        if (repo, digest) in seen:
+            continue
+        seen.add((repo, digest))
+        good = resolves(repo, digest)
+        print(f"  {'ok  ' if good else 'BAD '} {repo}@{digest[:19]}...")
+        ok = ok and good
+sys.exit(0 if ok else 1)
+PY
+
+echo "pre-push: gate passed"

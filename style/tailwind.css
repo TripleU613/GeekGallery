@@ -1,0 +1,162 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Only three things live here, and each is defined exactly once.
+ *
+ * The 1,200-line cascading stylesheet this replaces is gone because every
+ * layout bug it produced came from the cascade itself: two rules of equal
+ * specificity where the later one silently won (`.filterbar` beating
+ * `.filterbar--page`, a duplicate `.foot` overriding the real one, an
+ * `.icon-btn[aria-current]` rule that never landed). Layout now lives in
+ * utilities on the elements themselves, where there is no source order to lose
+ * a fight to.
+ *
+ * What stays here: base element defaults, and a small set of visual primitives
+ * repeated across many files, where 20 inline utilities would bury the markup.
+ * None of them set layout (no flex/grid/width/margin) -- that is exactly the
+ * category that has to stay visible in the component.
+ *
+ * There are seven primitives: `.btn`, `.icon-btn`, `.btn-quiet`, `.chip`,
+ * `.field`, `.card` and `.skeleton`. `.skeleton` earned a place here because
+ * every loading surface on the site (grid, detail, leaderboard rows, search)
+ * needs the same four properties and they are worthless separately. */
+
+@layer base {
+  /* The variables come from the flavor's `<style>` in the document head;
+   * these are only the fallback so an element is never transparent. */
+  html {
+    background-color: rgb(var(--c-bg, 10 11 15));
+  }
+
+  body {
+    @apply bg-bg text-ink font-sans antialiased;
+    line-height: 1.5;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* Never remove focus rings globally; make them the accent instead. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent, 154 164 255));
+    outline-offset: 2px;
+  }
+
+  /* The cheapest accent on the site: it costs no markup, no copy and no
+   * layout, and it shows up the instant anyone drags across a title. */
+  ::selection {
+    background-color: rgb(var(--c-accent, 154 164 255) / 0.14);
+    color: rgb(var(--c-ink, 242 244 248));
+  }
+}
+
+@layer components {
+  /* Primary action: filled accent, near-black text, 44px touch target. */
+  .btn {
+    @apply inline-flex min-h-[44px] items-center justify-center gap-2 rounded
+      bg-accent px-4 text-[0.9375rem] font-semibold text-accent-ink
+      transition-colors hover:bg-accent-hover active:bg-accent-active
+      disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Icon-only control. Sized 36px inside a taller row that supplies the touch
+   * target. Inherits currentColor so one rule serves every icon. */
+  .icon-btn {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded border
+      border-transparent bg-transparent text-ink-2 transition-colors
+      hover:bg-surface-hover hover:text-ink;
+  }
+
+  /* Current section for icon-only nav links. Background carries the state as
+   * well as the colour, since these controls have no visible text label. */
+  .icon-btn[aria-current="page"] {
+    @apply border-line bg-surface-raised text-accent;
+  }
+
+  /* Neutral secondary action with a visible label. */
+  .btn-quiet {
+    @apply inline-flex min-h-9 items-center gap-2 rounded border border-line
+      bg-transparent px-3 text-[0.85rem] text-ink-2 transition-colors
+      hover:border-line-strong hover:bg-surface-hover hover:text-ink;
+  }
+
+  /* A pill: sort tabs, tags. Selection also shifts weight so it is never
+   * signalled by hue alone. */
+  .chip {
+    @apply inline-flex flex-none items-center whitespace-nowrap rounded-full
+      border border-line bg-transparent px-3.5 text-[0.8125rem] text-ink-2
+      transition-colors hover:border-accent-line hover:text-accent;
+  }
+
+  .chip[aria-pressed="true"],
+  .chip.is-active {
+    @apply border-accent-border bg-accent-soft font-semibold text-accent;
+  }
+
+  /* Text input. */
+  .field {
+    @apply w-full rounded border border-line bg-surface px-3 py-2
+      text-[0.875rem] text-ink placeholder:text-ink-3;
+  }
+
+  /* Card surface. Layout (grid placement, aspect) stays in the component.
+   *
+   * The hover edge is the accent hairline, which is where most of the site's
+   * colour comes from: every tile in the gallery picks it up for one token's
+   * worth of change, on a surface whose colour is known, rather than from a
+   * fill sitting over arbitrary pictures.
+   *
+   * No outset box-shadow glow here, deliberately. card.rs sets
+   * `content-visibility:auto`, which implies `contain: paint`, and whether an
+   * element's own outset shadow still draws under paint containment is exactly
+   * the kind of thing this project has been burned assuming -- it can render
+   * correctly in one engine and vanish in another with no error anywhere. If a
+   * glow is ever wanted, `hover:ring-1 hover:ring-inset hover:ring-accent-line`
+   * draws inside the box and is unaffected; measure it in a browser first.
+   *
+   * The transition is named rather than `transition-colors` so it moves the two
+   * properties that actually change and not the five that do not. */
+  .card {
+    @apply overflow-hidden rounded-lg border border-line bg-surface
+      transition-[background-color,border-color] duration-200 ease-out
+      hover:border-accent-line hover:bg-surface-hover;
+  }
+
+  /* Loading placeholder: background colour, background image, background size,
+   * animation. That is the whole primitive.
+   *
+   * It sets NO border-radius, and that is a constraint, not an omission. Call
+   * sites need different radii (tiles are `rounded-lg`, rows `rounded`,
+   * avatars `rounded-full`); a radius here would land at equal specificity
+   * against the utility on the element and the winner would be decided by
+   * generated-stylesheet order -- the precise coin-flip this stylesheet was
+   * rewritten to remove. Radius, size, border and layout all stay on the
+   * element. For the same reason, never put a `bg-*` utility on a `.skeleton`:
+   * this rule already owns background-color *and* background-image. */
+  .skeleton {
+    @apply animate-shimmer bg-surface-raised bg-sheen bg-[length:200%_100%];
+  }
+}
+
+/* Respect reduced motion once, globally, rather than per rule.
+ *
+ * `animation-delay` is in here for a concrete reason, not for symmetry. The
+ * skeletons stagger their rows with `[animation-delay:...]` utilities up to
+ * 280ms. Clamping duration alone leaves the delay intact, so a staggered
+ * element would hold its 0% frame -- opacity 0 -- for the full delay and then
+ * snap in: a visible flash of missing content, aimed squarely at the people who
+ * asked for less motion. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

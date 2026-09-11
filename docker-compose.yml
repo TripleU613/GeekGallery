@@ -1,0 +1,51 @@
+# The production unit for one flavor: one container, no published port, no
+# volume, no local state. cloudflared inside it dials out to Cloudflare, so the
+# host needs no inbound rule for web traffic at all.
+#
+# One copy of this file per flavor on the host, at
+# /opt/geekgallery/<flavor>/docker-compose.yml, each brought up as its own
+# compose project (`-p gg-<flavor>`) so two flavors on one machine never share
+# a container name. Nothing in it is per-flavor: the image is the same build,
+# and the whole configuration arrives as ONE variable, GALLERY_ENV -- the
+# KEY=VALUE blob the deploy-env broker hands CI -- which the app unpacks into
+# its own environment at startup. Adding a setting is therefore a line in the
+# blob, never an edit here.
+#
+# Every ${VAR} is exported by the CI deploy step for the duration of one
+# `docker compose up`. There is no .env on the server, by design (SECURITY.md).
+services:
+  gallery:
+    # Explicit resolvers: the container talks to api.cloudflare.com (D1) and to
+    # R2 on every request, and a host with a flaky stub resolver once turned
+    # into "dispatch failure" errors in the upload path.
+    dns: [1.1.1.1, 1.0.0.1, 8.8.8.8]
+    image: ${GALLERY_IMAGE}
+    restart: unless-stopped
+    read_only: true
+    # Nothing in the image needs a capability: the app and cloudflared bind
+    # unprivileged ports as the `app` user. With every capability dropped and
+    # setuid escalation off, a bug in a media decoder is a crashed job, not a
+    # foothold on the host.
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1g
+    memswap_limit: 1g
+    cpus: 1.5
+    tmpfs:
+      # supervisord's pidfile and socket, cloudflared's scratch, and the link
+      # importer's downloads. `exec` is load-bearing: Docker mounts a tmpfs
+      # noexec by default, and yt-dlp is a self-extracting binary that unpacks
+      # its shared libraries under /tmp and loads them from there -- without
+      # it every yt-dlp import died with "libz.so.1: failed to map segment
+      # from shared object". The size covers a 60MB download, its merged
+      # output and the ~40MB of extracted libraries at once; tmpfs pages
+      # count against mem_limit.
+      - /tmp:size=384m,exec
+    environment:
+      RUST_LOG: info
+      # The flavor's whole configuration, one KEY=VALUE per line. Unpacked by
+      # the app (see main.rs); see FLAVORS.md for every key.
+      GALLERY_ENV: ${GALLERY_ENV}
+      # cloudflared is a separate process and reads its own variable, so the
+      # tunnel token is the one value lifted out of the blob by CI.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}

@@ -1,0 +1,14 @@
+# Never send secrets or local state into the build context. Docker sends
+# everything not listed here to the daemon before the first instruction even
+# runs, so this matters even for files no COPY ever references.
+.env
+.env.*
+!.env.example
+uploads/
+
+
+target/
+.git/
+.github/
+*.md
+secrets.env

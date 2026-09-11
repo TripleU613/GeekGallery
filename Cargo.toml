@@ -1,0 +1,210 @@
+[package]
+name = "geekgallery"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+# Pinned to exact minors. leptos declares leptos_macro with a caret, so a lock
+# can pair an older lib with a newer macro that calls internals the lib lacks
+# (e.g. __as_shared_reactive_fn). Pinning keeps CI reproducible.
+leptos = { version = "0.8.20" }
+leptos_router = { version = "0.8.15" }
+leptos_meta = { version = "0.8.6" }
+# Lucide line icons as Rust components. leptos_icons requires leptos >=0.8.3,
+# checked against the registry before adding since this repo deliberately pins
+# leptos to exact minors (a caret range here once forced a lib/macro mismatch).
+# icondata_lu, not the umbrella `icondata`: only the Lucide set is wanted, and
+# unused `pub const` icon data is dead-code-eliminated, so the wasm cost is
+# just the icons actually referenced.
+leptos_icons = { version = "0.7.1" }
+icondata_lu = { version = "0.1" }
+icondata_core = { version = "0.1" }
+serde = { version = "1", features = ["derive"] }
+# Both builds: the server writes the flavor into the page as JSON and the wasm
+# reads it back before hydrating (see `flavor`).
+serde_json = { version = "1" }
+
+# --- hydrate-only (wasm) ---
+# Not pinned exactly: an `=` pin here is what forced Cargo to backtrack leptos
+# to an older lib than its macro. cargo-leptos fetches a matching CLI itself.
+wasm-bindgen = { version = "0.2", optional = true }
+js-sys = { version = "0.3", optional = true }
+console_error_panic_hook = { version = "0.1", optional = true }
+gloo-net = { version = "0.6", features = ["http"], optional = true }
+web-sys = { version = "0.3", features = [
+  "File", "FileList", "FormData", "Blob", "Url", "HtmlInputElement",
+  "IntersectionObserver", "IntersectionObserverInit", "IntersectionObserverEntry",
+  # Share/copy button: navigator.share where it exists, clipboard where it
+  # doesn't. Both are behind their own web-sys features.
+  "Navigator", "Clipboard", "ShareData", "Location",
+  # Drag-and-drop onto the upload drop zone.
+  "DragEvent", "DataTransfer",
+  # The upload page draws a frame of a picked video onto a canvas and sends the
+  # JPEG up as the poster, since nothing on the server can decode video.
+  "HtmlVideoElement", "HtmlMediaElement", "HtmlCanvasElement",
+  "CanvasRenderingContext2d", "Document", "Window",
+  # Arrow-key stepping on a item's page: the key event's target has to be
+  # checked so typing in the search box does not turn the page.
+  "KeyboardEvent", "EventTarget", "Element",
+  # The clip player: the buffered range behind the scrubber, and the
+  # scrubber's own box for turning a pointer position into a time.
+  "TimeRanges", "DomRect",
+  # The upload page scores a few frames of a clip to pick its cover.
+  "ImageData",
+], optional = true }
+# Only for awaiting the clipboard promise, so "Copied" is shown after the write
+# succeeds rather than after it was merely requested. Already in the tree via
+# leptos; named here because this crate uses it directly.
+wasm-bindgen-futures = { version = "0.4", optional = true }
+# An awaitable sleep in wasm, for the upload page's poll loop. std::thread::sleep
+# does not exist there and setTimeout callbacks cannot be awaited directly.
+gloo-timers = { version = "0.3", features = ["futures"], optional = true }
+
+# --- ssr-only (server) ---
+leptos_axum = { version = "0.8.10", optional = true }
+axum = { version = "0.8", features = ["multipart"], optional = true }
+# `process` and `time` for the link importer: yt-dlp and ffmpeg run as
+# subprocesses under a timeout.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "process", "time", "sync"], optional = true }
+tower = { version = "0.5", optional = true }
+tower-http = { version = "0.6", features = ["fs"], optional = true }
+# D1 is spoken over its HTTP API, not a wire protocol sqlx understands, so
+# there is no sqlx driver for it. default-features off + rustls-tls: the
+# default TLS backend pulls in native-tls/openssl, and this repo already had
+# one rustls-webpki 0.101.7 (HIGH) advisory removed once from a different
+# dependency — no reason to reopen that door here.
+reqwest = { version = "0.13", default-features = false, features = [
+  "json", "rustls", "form", "multipart",
+], optional = true }
+image = { version = "0.25", optional = true }
+# For writing iTXt provenance chunks into stored PNGs -- already in the
+# dependency graph transitively via `image`, declared directly here because
+# that low-level chunk-writing API isn't exposed through `image`'s own
+# encoder.
+png = { version = "0.18", optional = true }
+async-trait = { version = "0.1", optional = true }
+# Only the S3 client; the Config is built by hand from env vars, so aws-config
+# and its credential-chain machinery are not needed.
+# default-features off on purpose: the default `rustls` feature selects the
+# legacy TLS stack (hyper 0.14 -> rustls 0.21 -> rustls-webpki 0.101.7, which
+# carries a HIGH advisory). `default-https-client` uses the modern one.
+aws-sdk-s3 = { version = "1", default-features = false, features = [
+  "http-1x", "default-https-client", "rt-tokio",
+], optional = true }
+uuid = { version = "1", features = ["v4"], optional = true }
+chrono = { version = "0.4", features = ["serde"], optional = true }
+anyhow = { version = "1", optional = true }
+tracing = { version = "0.1", optional = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+dotenvy = { version = "0.15", optional = true }
+# Session cookies. Used directly (not via axum-extra's PrivateCookieJar
+# extractor) to match this codebase's existing pattern of manual Cookie/
+# Set-Cookie header handling (see api.rs's voter cookie) rather than adding a
+# second dependency and a router-state restructure for the same job.
+cookie = { version = "0.18", features = ["private", "key-expansion"], optional = true }
+# PKCE challenge/state generation for the OAuth flow. `cookie`'s "private"
+# feature pulls these in transitively for its own encryption, but a crate's
+# transitive deps aren't usable from dependent code without declaring them too.
+base64 = { version = "0.23", optional = true }
+sha2 = { version = "0.11", optional = true }
+rand = { version = "0.10", optional = true }
+
+[features]
+default = ["ssr"]
+hydrate = [
+  "leptos/hydrate",
+  "dep:wasm-bindgen",
+  "dep:js-sys",
+  "dep:console_error_panic_hook",
+  "dep:gloo-net",
+  "dep:web-sys",
+  "dep:wasm-bindgen-futures",
+  "dep:gloo-timers",
+]
+ssr = [
+  "leptos/ssr",
+  "leptos_meta/ssr",
+  "leptos_router/ssr",
+  "dep:leptos_axum",
+  "dep:axum",
+  "dep:tokio",
+  "dep:tower",
+  "dep:tower-http",
+  "dep:reqwest",
+  "dep:image",
+  "dep:png",
+  "dep:async-trait",
+  "dep:aws-sdk-s3",
+  "dep:uuid",
+  "dep:chrono",
+  "dep:anyhow",
+  "dep:tracing",
+  "dep:tracing-subscriber",
+  "dep:dotenvy",
+  "dep:cookie",
+  "dep:base64",
+  "dep:sha2",
+  "dep:rand",
+]
+
+# Server binary only needs the ssr side.
+[[bin]]
+name = "geekgallery"
+path = "src/main.rs"
+required-features = ["ssr"]
+
+[package.metadata.leptos]
+output-name = "geekgallery"
+site-root = "target/site"
+site-pkg-dir = "pkg"
+# Tailwind replaces the hand-written stylesheet. cargo-leptos runs the CLI and
+# feeds the result through the same hashed-asset pipeline as before.
+tailwind-input-file = "style/tailwind.css"
+tailwind-config-file = "tailwind.config.js"
+assets-dir = "public"
+# Content-hash the built JS/WASM/CSS filenames. Not a nicety: /pkg/ is served
+# through Cloudflare with cache-control max-age=14400, so at a fixed filename
+# every deploy stayed invisible to visitors (and to the edge) for up to four
+# hours -- and served NEW html against OLD css in the meantime, which is worse
+# than either alone. Observed in production: origin had 15166 bytes of CSS
+# while the edge was still handing out a 12259-byte copy from a previous build.
+# A hashed name is a new URL, so a deploy can't be served stale.
+hash-files = true
+# 3000/3001 are commonly occupied (a Next dev server was already on 3000 here).
+site-addr = "0.0.0.0:3100"
+reload-port = 3101
+browserquery = "defaults"
+bin-features = ["ssr"]
+bin-default-features = false
+lib-features = ["hydrate"]
+lib-default-features = false
+
+# Line tables instead of full debug info.
+#
+# Not a preference: a plain `cargo build`/`cargo test --test ...` could not link
+# the binary at all. Full `.debug_info` across this dependency tree (image codecs,
+# aws-sdk, leptos) overruns the 32-bit range that R_X86_64_32 relocations have to
+# fit in, and the linker gives up with "relocation out of range ... consider
+# recompiling with -fdebug-types-section". Only `cargo leptos watch` and the
+# release build worked, which is why it went unnoticed -- and it meant an
+# integration test under tests/ could not be compiled, because building one links
+# the bin.
+#
+# Line tables keep what is actually used here: file and line in panics and
+# backtraces. Variable inspection in a debugger is what goes, and nothing in this
+# project has been debugged that way.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+
+# Keep wasm small without gutting server perf.
+[profile.wasm-release]
+inherits = "release"
+opt-level = "z"

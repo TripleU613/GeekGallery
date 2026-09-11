@@ -1,0 +1,235 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # A manual run from the Actions tab redeploys main as it stands: the way to
+  # pick up a rotated value or a newly added flavor in the deploy-env broker
+  # without a code change. `flavor` narrows it to one site.
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: "Deploy only this flavor (blank = every flavor the broker holds)"
+        required: false
+        default: ""
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  # Where the deploy-env broker (deploy/env-broker/) answers. A repository
+  # variable (Settings -> Secrets and variables -> Actions -> Variables), so a
+  # fork points at its own Worker without editing this file.
+  BROKER: ${{ vars.BROKER_URL }}
+
+jobs:
+  # The gate. Everything here is what `.githooks/pre-push` runs locally, so a
+  # failure in this job is a failure that a `git config core.hooksPath
+  # .githooks` would have caught before the push.
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: fmt
+        run: cargo fmt --all -- --check
+      # Both feature sets, always: `ssr` and `hydrate` compile disjoint code
+      # from the same files, so one passing says nothing about the other.
+      - name: clippy (server)
+        run: cargo clippy --no-default-features --features ssr --all-targets -- -D warnings
+      - name: clippy (wasm)
+        run: >
+          cargo clippy --no-default-features --features hydrate
+          --target wasm32-unknown-unknown -- -D warnings
+      - name: test
+        run: cargo test --no-default-features --features ssr
+      - name: no secret in history or tracked files
+        run: scripts/audit-secrets.sh
+
+  # The image, built on every push and PR so a Dockerfile mistake surfaces
+  # here; pushed to GHCR only from main. One image for every flavor: nothing
+  # about a site is baked in at build time.
+  build:
+    needs: check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image: ${{ steps.ref.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: compute lowercase image repository
+        id: repo
+        run: echo "name=$(echo '${{ github.repository }}' | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - name: log in to GHCR
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: build image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: ${{ github.ref == 'refs/heads/main' && github.event_name != 'pull_request' }}
+          tags: |
+            ghcr.io/${{ steps.repo.outputs.name }}:${{ github.sha }}
+            ghcr.io/${{ steps.repo.outputs.name }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # By digest, not by tag: `:latest` on the deploy host is whatever was
+      # pulled last, and a rollback needs a name that means one build.
+      - name: resolve image references
+        id: ref
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: |
+          echo "image=ghcr.io/${{ steps.repo.outputs.name }}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+  # Which sites exist is not written down anywhere in this repository. The
+  # deploy-env broker (deploy/env-broker/) holds one secret per flavor and
+  # lists their names to a job that presents GitHub's own OIDC token for a
+  # push to main of this repository; that list becomes the deploy matrix.
+  flavors:
+    needs: build
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    outputs:
+      matrix: ${{ steps.list.outputs.matrix }}
+    steps:
+      - name: ask the broker
+        id: list
+        env:
+          ONLY: ${{ github.event.inputs.flavor }}
+        run: |
+          [ -n "$BROKER" ] || { echo "::error::set the BROKER_URL repository variable to your deploy-env broker's URL (deploy/env-broker/README.md)"; exit 1; }
+          jwt=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=geekgallery-deploy" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
+          list=$(curl -sS -X POST -H "Authorization: Bearer $jwt" -w '\n%{http_code}' "$BROKER/flavors")
+          code="${list##*$'\n'}"; list="${list%$'\n'*}"
+          if [ "$code" != "200" ]; then
+            echo "::error::the deploy-env broker answered $code to /flavors -- see deploy/env-broker/README.md"
+            exit 1
+          fi
+          if [ -n "$ONLY" ]; then
+            list=$(printf '["%s"]' "$ONLY")
+          fi
+          echo "flavors: $list"
+          [ "$list" != "[]" ] || { echo "::error::the broker holds no FLAVOR_ENV_* secret"; exit 1; }
+          echo "matrix=$list" >> "$GITHUB_OUTPUT"
+
+  # Over the tailnet to each flavor's deploy host, keyless: the runner joins
+  # as an ephemeral tagged node with the Tailscale auth key from the flavor's
+  # own blob and the host's Tailscale SSH policy lets tag:ci in as root.
+  # Nothing on the public internet listens.
+  #
+  # Every runtime value comes from ONE place: the flavor's KEY=VALUE file from
+  # the broker. Lines starting with # and blank lines are ignored; every value
+  # is masked in the log before anything else runs. The file itself, minus the
+  # runner's own keys, travels to the host as one variable (GALLERY_ENV) and
+  # the app unpacks it -- see FLAVORS.md.
+  deploy:
+    needs: [build, flavors]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        flavor: ${{ fromJSON(needs.flavors.outputs.matrix) }}
+    permissions:
+      contents: read
+      packages: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: fetch the flavor
+        id: env
+        env:
+          FLAVOR: ${{ matrix.flavor }}
+        run: |
+          jwt=$(curl -sSf -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=geekgallery-deploy" \
+            | python3 -c 'import json,sys; print(json.load(sys.stdin)["value"])')
+          blob=$(curl -sS -X POST -H "Authorization: Bearer $jwt" -w '\n%{http_code}' "$BROKER/flavor/$FLAVOR")
+          code="${blob##*$'\n'}"; blob="${blob%$'\n'*}"
+          if [ "$code" != "200" ]; then
+            echo "::error::the deploy-env broker answered $code for flavor '$FLAVOR' -- see deploy/env-broker/README.md"
+            exit 1
+          fi
+          f="$RUNNER_TEMP/flavor.env"
+          printf '%s\n' "$blob" | grep -vE '^[[:space:]]*(#|$)' | tr -d '\r' > "$f"
+          chmod 600 "$f"
+          # Mask before use: the deploy step prints command lines on failure,
+          # and a value that is already masked cannot end up in a log.
+          while IFS= read -r line; do
+            v="${line#*=}"
+            [ -n "$v" ] && echo "::add-mask::$v"
+          done < "$f"
+          need() {
+            local v; v=$(grep "^$1=" "$f" | head -1); v="${v#*=}"
+            [ -n "$v" ] || { echo "::error::flavor '$FLAVOR' has no $1"; exit 1; }
+            echo "$2=$v" >> "$GITHUB_OUTPUT"
+          }
+          need TS_CI_AUTHKEY ts
+          need DEPLOY_HOST host
+          need DEPLOY_HOST_KEY hostkey
+          need CF_TUNNEL_TOKEN tunnel
+          legacy=$(grep '^LEGACY_COMPOSE=' "$f" | head -1); echo "legacy=${legacy#*=}" >> "$GITHUB_OUTPUT"
+      - uses: tailscale/github-action@v3
+        with:
+          authkey: ${{ steps.env.outputs.ts }}
+          tags: tag:ci
+      # The host's ssh key comes from the flavor too (DEPLOY_HOST_KEY), so
+      # the connection is pinned rather than trust-on-first-use and nothing
+      # about any host is written down in this repository.
+      - name: pin the host key
+        env:
+          DEPLOY_HOST: ${{ steps.env.outputs.host }}
+          DEPLOY_HOST_KEY: ${{ steps.env.outputs.hostkey }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s %s\n' "$DEPLOY_HOST" "$DEPLOY_HOST_KEY" >> ~/.ssh/known_hosts
+      - name: deploy
+        env:
+          FLAVOR: ${{ matrix.flavor }}
+          DEPLOY_HOST: ${{ steps.env.outputs.host }}
+          TUNNEL_TOKEN: ${{ steps.env.outputs.tunnel }}
+          LEGACY_COMPOSE: ${{ steps.env.outputs.legacy }}
+          GALLERY_IMAGE: ${{ needs.build.outputs.image }}
+          GHCR_USER: ${{ github.actor }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ssh root@$DEPLOY_HOST "mkdir -p /opt/geekgallery/$FLAVOR"
+          scp docker-compose.yml root@$DEPLOY_HOST:/opt/geekgallery/$FLAVOR/docker-compose.yml
+          # The configuration travels on the SSH session's stdin as `export`
+          # lines followed by the deploy script, never as command-line
+          # arguments -- on a command line it would sit in the host's process
+          # list for the length of the deploy. The runner's own keys
+          # (TS_CI_AUTHKEY, DEPLOY_HOST, DEPLOY_HOST_KEY, LEGACY_COMPOSE) stay here.
+          remote_script() {
+            printf 'export GALLERY_FLAVOR=%q\n' "$FLAVOR"
+            printf 'export GALLERY_IMAGE=%q\n' "$GALLERY_IMAGE"
+            printf 'export TUNNEL_TOKEN=%q\n' "$TUNNEL_TOKEN"
+            printf 'export LEGACY_COMPOSE=%q\n' "$LEGACY_COMPOSE"
+            printf 'export GALLERY_ENV=%q\n' \
+              "$(grep -vE '^(TS_CI_AUTHKEY|DEPLOY_HOST|DEPLOY_HOST_KEY|LEGACY_COMPOSE)=' "$RUNNER_TEMP/flavor.env")"
+            cat deploy/remote-deploy.sh
+          }
+          printf '%s' "$GHCR_TOKEN" \
+            | ssh root@$DEPLOY_HOST "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+          if remote_script | ssh root@$DEPLOY_HOST 'bash -s'; then
+            status=0
+          else
+            status=$?
+          fi
+          ssh root@$DEPLOY_HOST 'docker logout ghcr.io' || true
+          exit $status
