@@ -20,6 +20,7 @@
 //! credential and an endpoint of its own to reach any of them, which is three
 //! new things to secure in exchange for a timer.
 
+use std::collections::HashSet;
 use std::time::Duration;
 
 /// A sitemap is small. This is the ceiling on a page that claims otherwise.
@@ -94,8 +95,15 @@ pub fn spawn() {
         }
     );
     tokio::spawn(async move {
+        // Every link this process has already handed to the importer. A link
+        // whose import was refused -- the usual reason being that the other
+        // site carries the same picture twice and the second copy is a
+        // byte-for-byte duplicate -- never gains a `source_url` row, so the
+        // database alone would have it fetched again every pass. Once per
+        // process is the right number of tries; a restart gets one more.
+        let mut attempted: HashSet<String> = HashSet::new();
         loop {
-            match pass(&cfg).await {
+            match pass(&cfg, &mut attempted).await {
                 Ok((0, seen)) => {
                     tracing::info!("mirror: nothing new ({seen} link(s) on the sitemap)");
                 }
@@ -114,7 +122,7 @@ pub fn spawn() {
 
 /// One pass. Returns how many links were queued and how many the sitemap
 /// offered, for the log line.
-async fn pass(cfg: &Config) -> anyhow::Result<(usize, usize)> {
+async fn pass(cfg: &Config, attempted: &mut HashSet<String>) -> anyhow::Result<(usize, usize)> {
     let xml = crate::fetch::guarded_text(&cfg.sitemap, SITEMAP_CAP)
         .await
         .map_err(|e| anyhow::anyhow!("could not read the sitemap: {e}"))?;
@@ -131,9 +139,10 @@ async fn pass(cfg: &Config) -> anyhow::Result<(usize, usize)> {
         if queued >= cfg.per_run {
             break;
         }
-        if known.contains(&link) {
+        if known.contains(&link) || attempted.contains(&link) {
             continue;
         }
+        attempted.insert(link.clone());
         crate::import_route::queue(link, String::new(), None);
         queued += 1;
     }
