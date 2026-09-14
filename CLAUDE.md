@@ -170,6 +170,12 @@ entry was paid for.
   old container answering for a new file), and the edge served that 404 for
   the CSS long after the origin was fixed. Errors get `no-store`; a zone
   purge is the only way out once it has happened.
+- **Deleting an object from R2 does not delete it from the edge.** Media is
+  served `immutable, max-age=31536000`; after an admin delete every edge that
+  had the thumbnail kept answering `HIT 200` with it, and would have for a
+  year. `admin_delete_item` purges the item's URLs through `edge_cache.rs`
+  when `CF_ZONE_ID`/`CF_CACHE_PURGE_TOKEN` are in the flavor; without them the
+  only remedy is a purge by hand.
 - **Cache-Control on HTML is `private, no-cache`** because the served body
   contains per-visitor state (account menu, which items you have liked). Do
   not relax it for edge caching without moving that state out of the SSR'd

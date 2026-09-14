@@ -315,14 +315,17 @@ pub async fn admin_set_public(id: String, public: bool) -> Result<(), ServerFnEr
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
-/// Removes the row and every R2 object under the item's id -- original, thumbnail
-/// and poster. There is no undo — the confirmation happens client-side (see the
-/// admin page), not here, since a server fn has no way to ask "are you sure"
-/// mid-request.
+/// Removes the row, every R2 object under the item's id -- original, thumbnail
+/// and poster -- and then those objects' URLs from the CDN's edge cache (see
+/// `edge_cache.rs`; without that step a deleted thumbnail keeps serving from
+/// the edge for up to a year). There is no undo — the confirmation happens
+/// client-side (see the admin page), not here, since a server fn has no way to
+/// ask "are you sure" mid-request.
 #[server(AdminDeleteItem, "/api")]
 pub async fn admin_delete_item(id: String) -> Result<(), ServerFnError> {
     require_admin().await?;
     crate::storage::remove(&id).await;
+    crate::edge_cache::purge_item(&id).await;
     crate::db::delete_item(&id)
         .await
         .map_err(|e| ServerFnError::new(e.to_string()))

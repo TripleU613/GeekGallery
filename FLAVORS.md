@@ -133,6 +133,7 @@ draws the six files from two colours.
 | `ADMIN_EMAILS` | no | Comma-separated. Re-applied at every login. |
 | `PSEUDONYMS` | no | `email=Name` or `email=Name\|https://avatar`, comma-separated: publish someone under a different name. |
 | `CF_ANALYTICS_TOKEN` | no | Cloudflare Web Analytics beacon. Absent, no script. |
+| `CF_ZONE_ID` / `CF_CACHE_PURGE_TOKEN` | production | The zone the media domain is in, and a token with only *Zone > Cache Purge* on it. With both set, deleting an item also purges its media URLs from the edge; without them a deleted thumbnail keeps serving from the CDN for up to a year. Both or neither. |
 | `INDEXNOW_KEY` | no | 8-128 alphanumerics. Pings IndexNow on every publish. |
 | `TURNSTILE_SITE_KEY` / `TURNSTILE_SECRET` | no | The captcha in front of uploads and imports. Both or neither. |
 | `CF_TUNNEL_TOKEN` | production | cloudflared's. Lifted out of the blob by CI as `TUNNEL_TOKEN`. |

@@ -27,6 +27,9 @@ pub mod d1;
 pub mod db;
 #[cfg(feature = "ssr")]
 pub mod dedupe;
+/// Purges a deleted item's media from the CDN edge, when a zone is configured.
+#[cfg(feature = "ssr")]
+pub mod edge_cache;
 /// Reorders an MP4 so it starts playing before the whole file has arrived.
 #[cfg(feature = "ssr")]
 pub mod faststart;
