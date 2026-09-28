@@ -27,7 +27,7 @@ jobs:
   # failure in this job is a failure that a `git config core.hooksPath
   # .githooks` would have caught before the push.
   check:
-    runs-on: ubuntu-latest
+    runs-on: ${{ !contains(fromJSON('["pull_request","pull_request_review","pull_request_target","issue_comment","workflow_run"]'), github.event_name) && 'debiantripleu-ci' || 'ubuntu-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -55,7 +55,7 @@ jobs:
   # about a site is baked in at build time.
   build:
     needs: check
-    runs-on: ubuntu-latest
+    runs-on: ${{ !contains(fromJSON('["pull_request","pull_request_review","pull_request_target","issue_comment","workflow_run"]'), github.event_name) && 'debiantripleu-ci' || 'ubuntu-latest' }}
     permissions:
       contents: read
       packages: write
@@ -100,7 +100,7 @@ jobs:
   flavors:
     needs: build
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
-    runs-on: ubuntu-latest
+    runs-on: ${{ !contains(fromJSON('["pull_request","pull_request_review","pull_request_target","issue_comment","workflow_run"]'), github.event_name) && 'debiantripleu-ci' || 'ubuntu-latest' }}
     permissions:
       id-token: write
     outputs:
@@ -140,7 +140,7 @@ jobs:
   # the app unpacks it -- see FLAVORS.md.
   deploy:
     needs: [build, flavors]
-    runs-on: ubuntu-latest
+    runs-on: ${{ !contains(fromJSON('["pull_request","pull_request_review","pull_request_target","issue_comment","workflow_run"]'), github.event_name) && 'debiantripleu-ci' || 'ubuntu-latest' }}
     strategy:
       fail-fast: false
       matrix:
