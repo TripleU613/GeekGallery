@@ -1,0 +1,17 @@
+{
+  "name": "kirkifier-tiny-face",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "vendor": "node tools/vendor.mjs",
+    "serve": "node tools/serve.mjs",
+    "test": "node --test \"test/unit/*.test.js\"",
+    "e2e": "node test/e2e/run.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-web": "1.30.0"
+  },
+  "devDependencies": {
+    "puppeteer-core": "25.12.0"
+  }
+}
