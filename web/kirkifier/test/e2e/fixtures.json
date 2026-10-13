@@ -1,0 +1,14 @@
+{
+  "source": "NASA Image and Video Library (images.nasa.gov). NASA photographs are not copyrighted in the United States; they are used here only as test inputs, are downloaded at test time and are never committed.",
+  "images": [
+    { "id": "S69-31740", "covers": "three frontal faces, studio light", "expectFaces": 3, "sha256": "0f11e9c3dde48bae420fbe3b76b6f4ebdc5dc25492828cec010a355deca48e11" },
+    { "id": "jsc2008e049010", "covers": "six small faces at night", "expectFaces": 6, "sha256": "838bd86694d91648b89805369a79ced2d11ac20fdb2080a87017e00b5185717a" },
+    { "id": "sts078-397-030", "covers": "crew in orbit, tilted and upside-down faces", "sha256": "4d0411a53565683c602511961d20010eb2b47eac3fdb7bd96e75f891740cf3ab" },
+    { "id": "sts064-30-006", "covers": "crew in orbit, heads at every angle", "sha256": "0a9bc34855402c73441c956f4efdc2fc0912ce1ec9b55440afa7d4cf07fccf1d" },
+    { "id": "jsc2025e068207_alt", "covers": "one large face, official portrait", "expectFaces": 1, "sha256": "3d574598d0bb7681da3d59174f4bb22bec0207f41cc00b1599a6119fb502604f" },
+    { "id": "S84-40242", "covers": "one large face, 1980s film portrait", "expectFaces": 1, "sha256": "ab451697cd091df6a85462fb1077bfc59fea19bba159c9ae0df00e2b08a7a00a" },
+    { "id": "art002e004440", "covers": "dark cabin, coloured light: a known miss", "sha256": "cf02c83b6ece5d35311510de2dd618dcc84a5ac22b8119ee622ddf2fe790b468" },
+    { "id": "jsc2026e019618", "covers": "control room, small faces mostly turned away", "sha256": "4e8888c9d98273b1e53234096b9191b87470fc31553ed7279776906c6021255d" },
+    { "id": "iss071e581260_alt", "covers": "no face at all", "expectFaces": 0, "sha256": "9063ff4243256aff20d1eb152f2cf3b9f6291cd0de6f875bda57ed66fce05513" }
+  ]
+}

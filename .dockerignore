@@ -12,3 +12,7 @@ target/
 .github/
 *.md
 secrets.env
+
+# The standalone browser tool: not part of the app image, and its
+# node_modules, vendored runtime and test output are large.
+web/

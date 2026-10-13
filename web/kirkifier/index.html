@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- The page may fetch only from itself, so even a bug or a hostile
+         dependency could not send a photo anywhere else. The server sends the
+         same policy as a header (tools/serve.mjs); a worker gets its policy
+         from its own response, not from this tag. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; img-src 'self' blob: data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'"
+    />
+    <title>Tiny-face warp</title>
+    <link rel="icon" href="data:," />
+    <meta name="description" content="Shrink the face in a photo, right in your browser. Nothing is uploaded." />
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="src/app.js"></script>
+  </head>
+  <body data-stage="loading">
+    <main class="page">
+      <header class="head">
+        <h1>Tiny-face warp</h1>
+        <p class="lede">
+          Shrinks the face that's already in your photo. It's a geometric warp of your own pixels: it
+          doesn't put anyone else's face in.
+        </p>
+        <p class="privacy">
+          <span class="dot" aria-hidden="true"></span>
+          Runs on this device. Your photo is never uploaded.
+        </p>
+      </header>
+
+      <section id="pick" class="pick" aria-label="Choose a photo">
+        <label class="drop" for="file">
+          <span class="drop-title">Drop a photo here</span>
+          <span class="drop-sub">or paste one, or <span class="link">choose a file</span> &middot; JPEG, PNG or WebP</span>
+          <input id="file" type="file" accept="image/jpeg,image/png,image/webp" />
+        </label>
+      </section>
+
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section id="result" class="result" hidden aria-label="Result">
+        <div id="stage" class="stage">
+          <canvas id="after" class="layer" aria-label="Your photo with the warp applied"></canvas>
+          <div id="before-wrap" class="before">
+            <canvas id="before" class="layer" aria-label="Your photo as it was"></canvas>
+            <svg id="boxes" class="boxes" aria-hidden="true"></svg>
+          </div>
+          <div class="split-line" aria-hidden="true"></div>
+          <span class="tag tag-before" aria-hidden="true">Before</span>
+          <span class="tag tag-after" aria-hidden="true">Edited &middot; tiny-face warp</span>
+          <input id="compare" class="compare" type="range" min="0" max="100" value="50" aria-label="Compare before and after" />
+        </div>
+
+        <div class="controls">
+          <label class="slider">
+            <span>Face size <output id="size-out"></output></span>
+            <input id="size" type="range" min="25" max="95" step="1" />
+          </label>
+          <label class="slider">
+            <span>Area <output id="reach-out"></output></span>
+            <input id="reach" type="range" min="80" max="130" step="1" value="100" />
+          </label>
+          <fieldset id="faces" class="faces">
+            <legend>Faces</legend>
+            <div id="face-list" class="face-list"></div>
+          </fieldset>
+          <div class="actions">
+            <button id="save-png" class="btn" type="button">Download PNG</button>
+            <button id="save-jpg" class="btn btn-quiet" type="button">Download JPEG</button>
+            <button id="again" class="btn btn-quiet" type="button">Use another photo</button>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <details>
+          <summary>How this works</summary>
+          <p>
+            Your browser decodes the photo, finds faces with a small detector (YuNet, 230&nbsp;KB) running
+            on the CPU through ONNX Runtime's WebAssembly backend, and pulls each face's eyes, nose and
+            mouth toward its middle while the skin around them stretches to fill in. Everything outside
+            each face stays exactly as it was. No graphics card, no server, no account.
+          </p>
+          <p>
+            Downloads carry a note in their metadata saying they were edited with this warp. Metadata
+            doesn't survive a screenshot, so please don't pass an edit off as an untouched photo.
+          </p>
+        </details>
+      </footer>
+    </main>
+    <output id="metrics" hidden></output>
+  </body>
+</html>
