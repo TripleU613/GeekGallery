@@ -140,7 +140,11 @@ jobs:
   # the app unpacks it -- see FLAVORS.md.
   deploy:
     needs: [build, flavors]
-    runs-on: ${{ !contains(fromJSON('["pull_request","pull_request_review","pull_request_target","issue_comment","workflow_run"]'), github.event_name) && 'debiantripleu-ci' || 'ubuntu-latest' }}
+    # GitHub-hosted on purpose: the job joins the tailnet as an ephemeral
+    # tag:ci node. debiantripleu already runs its own tailscaled, so the
+    # action's `tailscale up` is refused there and the box cannot see the
+    # deploy host.
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
