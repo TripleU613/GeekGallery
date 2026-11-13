@@ -84,7 +84,7 @@ jobs:
             ghcr.io/${{ steps.repo.outputs.name }}:${{ github.sha }}
             ghcr.io/${{ steps.repo.outputs.name }}:latest
           cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-to: type=gha,mode=max,ignore-error=true
       # By digest, not by tag: `:latest` on the deploy host is whatever was
       # pulled last, and a rollback needs a name that means one build.
       - name: resolve image references
