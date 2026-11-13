@@ -2,7 +2,7 @@ use leptos::prelude::*;
 use leptos_meta::Title;
 use leptos_router::components::A;
 
-use crate::api::{admin_delete_item, admin_flagged_items, admin_set_public};
+use crate::api::{admin_delete_item, admin_dismiss_reports, admin_flagged_items, admin_set_public};
 use crate::components::empty::{EmptyState, ErrorState};
 use crate::components::icon::{Ico, LuCheck, LuCircleAlert, LuUserRound};
 use crate::components::sign_in::SignInLink;
@@ -146,6 +146,7 @@ fn AdminRow(
     let is_public = item.is_public;
     let id_for_toggle = item.id.clone();
     let id_for_delete = item.id.clone();
+    let id_for_dismiss = item.id.clone();
 
     let toggle = Action::new(move |()| {
         let id = id_for_toggle.clone();
@@ -154,6 +155,10 @@ fn AdminRow(
     let delete = Action::new(move |()| {
         let id = id_for_delete.clone();
         async move { admin_delete_item(id).await }
+    });
+    let dismiss = Action::new(move |()| {
+        let id = id_for_dismiss.clone();
+        async move { admin_dismiss_reports(id).await }
     });
 
     // Both actions refetch the queue on success, from a plain Effect rather
@@ -166,6 +171,11 @@ fn AdminRow(
     });
     Effect::new(move |_| {
         if delete.value().get().is_some_and(|r| r.is_ok()) {
+            on_change();
+        }
+    });
+    Effect::new(move |_| {
+        if dismiss.value().get().is_some_and(|r| r.is_ok()) {
             on_change();
         }
     });
@@ -222,7 +232,24 @@ fn AdminRow(
                         </li>
                     </For>
                 </ul>
-                <div class="flex items-center gap-2.5">
+                <div class="flex flex-wrap items-center gap-2.5">
+                    // Only for a reported item: one an admin hid by hand has no
+                    // reports to dismiss, and Unhide already covers it.
+                    {has_reports
+                        .then(|| {
+                            view! {
+                                <button
+                                    class="btn-quiet"
+                                    title="Delete the reports and put it back in the gallery"
+                                    disabled=move || dismiss.pending().get()
+                                    on:click=move |_| {
+                                        dismiss.dispatch(());
+                                    }
+                                >
+                                    "Dismiss reports"
+                                </button>
+                            }
+                        })}
                     <button
                         class="btn-quiet"
                         disabled=move || toggle.pending().get()
@@ -275,7 +302,8 @@ fn AdminRow(
                 // "already handled" and "still live".
                 {move || {
                     let failed = toggle.value().get().is_some_and(|r| r.is_err())
-                        || delete.value().get().is_some_and(|r| r.is_err());
+                        || delete.value().get().is_some_and(|r| r.is_err())
+                        || dismiss.value().get().is_some_and(|r| r.is_err());
                     failed
                         .then(|| {
                             view! {

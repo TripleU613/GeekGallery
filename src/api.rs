@@ -315,6 +315,16 @@ pub async fn admin_set_public(id: String, public: bool) -> Result<(), ServerFnEr
         .map_err(|e| ServerFnError::new(e.to_string()))
 }
 
+/// Clears an item's reports and puts it back in the gallery -- "these reports
+/// are wrong". See `db::dismiss_reports`.
+#[server(AdminDismissReports, "/api")]
+pub async fn admin_dismiss_reports(id: String) -> Result<(), ServerFnError> {
+    require_admin().await?;
+    crate::db::dismiss_reports(&id)
+        .await
+        .map_err(|e| ServerFnError::new(e.to_string()))
+}
+
 /// Removes the row, every R2 object under the item's id -- original, thumbnail
 /// and poster -- and then those objects' URLs from the CDN's edge cache (see
 /// `edge_cache.rs`; without that step a deleted thumbnail keeps serving from

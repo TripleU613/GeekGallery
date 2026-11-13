@@ -598,6 +598,23 @@ pub async fn set_public(id: &str, public: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Dismiss every report against an item: the reports were wrong, so they are
+/// deleted outright (the reporter may report again if it really is a problem)
+/// and the item goes back up, undoing the auto-hide those reports caused. It
+/// then leaves the admin queue, which selects `reports > 0 OR is_public = 0`.
+pub async fn dismiss_reports(id: &str) -> anyhow::Result<()> {
+    client()
+        .exec("DELETE FROM reports WHERE item_id = ?1", vec![json!(id)])
+        .await?;
+    client()
+        .exec(
+            "UPDATE items SET reports = 0, is_public = 1 WHERE id = ?1",
+            vec![json!(id)],
+        )
+        .await?;
+    Ok(())
+}
+
 /// Delete a item's row and its reports/likes (both `ON DELETE CASCADE`, though
 /// D1's HTTP API executes each statement without a guarantee that
 /// `PRAGMA foreign_keys` is on for it, so the cascades are not solely relied
